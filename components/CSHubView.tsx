@@ -66,6 +66,8 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchQuery, setSearchQuery] = useState<string>('');
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [categoryFilter, setCategoryFilter] = useState<string>('all');
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'Timestamp', direction: 'descending' });
     const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open');
@@ -83,6 +85,15 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
     const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
     const [visibleColumnKeys, setVisibleColumnKeys] = useState<Set<keyof CustomerRecord | 'Customer'>>(new Set(DEFAULT_VISIBLE_COLUMNS));
     const columnSelectorRef = useRef<HTMLDivElement>(null);
+
+    const uniqueStatuses = useMemo(() => {
+        const statuses = new Set(records.filter(r => r.Status && r.Status !== 'Closed').map(r => r.Status));
+        return Array.from(statuses).sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
+    }, [records]);
+
+    const uniqueCategories = useMemo(() => {
+        return [...new Set(records.map(r => r['Ticket Category']).filter(Boolean))].sort();
+    }, [records]);
 
     const getLocalStorageKey = (tab: 'open' | 'closed') => `cshub-visible-columns-${tab}`;
 
@@ -282,6 +293,13 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
         }
     };
     
+     const handleTabChange = (tab: 'open' | 'closed') => {
+        setActiveTab(tab);
+        setCurrentPage(1);
+        setStatusFilter('all');
+        setCategoryFilter('all');
+    };
+
     const processedRecords = useMemo(() => {
         // 0. Filter by tab
         const tabFiltered = records.filter(record => {
@@ -291,8 +309,15 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
             return record.Status === 'Closed';
         });
 
-        // 1. Filter by search
-        const searchFiltered = tabFiltered.filter(record => {
+        // 1. Filter by status and category
+        const advancedFiltered = tabFiltered.filter(record => {
+            const statusMatch = activeTab === 'closed' || statusFilter === 'all' || record.Status === statusFilter;
+            const categoryMatch = categoryFilter === 'all' || record['Ticket Category'] === categoryFilter;
+            return statusMatch && categoryMatch;
+        });
+
+        // 2. Filter by search
+        const searchFiltered = advancedFiltered.filter(record => {
             const query = searchQuery.toLowerCase();
             const fullName = `${record['First Name'] || ''} ${record['Last Name'] || ''}`.toLowerCase();
             const email = (record['Email Address'] || '').toLowerCase();
@@ -300,7 +325,7 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
             return fullName.includes(query) || email.includes(query) || ticketId.includes(query);
         });
 
-        // 2. Sort & Group
+        // 3. Sort & Group
         searchFiltered.sort((a, b) => {
             // Primary sort: Group by Status
             const statusA = STATUS_ORDER.indexOf(a.Status);
@@ -330,7 +355,7 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
         });
 
         return searchFiltered;
-    }, [records, searchQuery, sortConfig, activeTab]);
+    }, [records, searchQuery, sortConfig, activeTab, statusFilter, categoryFilter]);
 
     const paginatedRecords = useMemo(() => {
         const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
@@ -341,7 +366,7 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
 
     return (
         <>
-            <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                 <h1 className="text-4xl font-bold text-on-surface text-center md:text-left w-full md:w-auto">Customer Service Hub</h1>
                  <div className="flex w-full md:w-auto md:flex-grow max-w-lg items-center gap-2">
                      <div className="relative flex-grow">
@@ -396,25 +421,53 @@ const CSHubView: React.FC<CSHubViewProps> = ({ records, setRecords, refetchData,
                 </Tooltip>
             </header>
 
+            <div className="flex flex-col sm:flex-row gap-4 mb-4 p-4 bg-gray-50 rounded-lg border border-border-color items-center">
+                <span className="font-semibold text-on-surface-secondary text-sm flex-shrink-0">Filters:</span>
+                <div className="flex items-center gap-4 w-full flex-wrap">
+                    {activeTab === 'open' && (
+                        <div className="flex-1 min-w-[150px]">
+                            <label htmlFor="statusFilter" className="sr-only">Filter by Status</label>
+                            <select
+                                id="statusFilter"
+                                value={statusFilter}
+                                onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                                className="w-full pl-3 pr-8 py-2 bg-surface border border-border-color text-on-surface rounded-lg focus:ring-primary focus:border-primary text-sm"
+                                aria-label="Filter by Status"
+                            >
+                                <option value="all">All Statuses</option>
+                                {uniqueStatuses.map(status => <option key={status} value={status}>{status}</option>)}
+                            </select>
+                        </div>
+                    )}
+                    <div className="flex-1 min-w-[150px]">
+                        <label htmlFor="categoryFilter" className="sr-only">Filter by Category</label>
+                        <select
+                            id="categoryFilter"
+                            value={categoryFilter}
+                            onChange={e => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
+                            className="w-full pl-3 pr-8 py-2 bg-surface border border-border-color text-on-surface rounded-lg focus:ring-primary focus:border-primary text-sm"
+                            aria-label="Filter by Category"
+                        >
+                            <option value="all">All Categories</option>
+                            {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             {error && <Alert message={error} type="error" onClose={() => setError(null)} />}
 
              <div className="mb-4 border-b border-border-color">
                 <nav className="-mb-px flex space-x-8" aria-label="Tabs">
                     <button
-                        onClick={() => {
-                            setActiveTab('open');
-                            setCurrentPage(1);
-                        }}
+                        onClick={() => handleTabChange('open')}
                         className={`${activeTab === 'open' ? 'border-primary text-primary' : 'border-transparent text-on-surface-secondary hover:text-on-surface hover:border-gray-300'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 focus:outline-none`}
                         aria-current={activeTab === 'open' ? 'page' : undefined}
                     >
                         Open Tickets
                     </button>
                     <button
-                        onClick={() => {
-                            setActiveTab('closed');
-                            setCurrentPage(1);
-                        }}
+                        onClick={() => handleTabChange('closed')}
                         className={`${activeTab === 'closed' ? 'border-primary text-primary' : 'border-transparent text-on-surface-secondary hover:text-on-surface hover:border-gray-300'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 focus:outline-none`}
                          aria-current={activeTab === 'closed' ? 'page' : undefined}
                     >
