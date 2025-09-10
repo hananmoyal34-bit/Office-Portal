@@ -41,82 +41,80 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [financingRecords, setFinancingRecords] = useState<FinancingRecord[]>([]);
     
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState<Partial<Record<View, boolean>>>({});
+    const [error, setError] = useState<Partial<Record<View, string | null>>>({});
+    const [fetchedViews, setFetchedViews] = useState<Set<View>>(new Set());
+    
     const [syncState, setSyncState] = useState<SyncState>({ pending: 0, status: 'idle', message: '' });
     const syncTimeoutRef = useRef<number | null>(null);
 
     const availableViews = roleViews[user.Role] || [];
 
     useEffect(() => {
-        if (availableViews.length > 0 && !availableViews.includes(activeView as View)) {
+        if (availableViews.length > 0 && !activeView) {
             setActiveView(availableViews[0]);
         }
     }, [user.Role, availableViews, activeView]);
 
     const fetchCSHubData = useCallback(async () => {
-        try {
-            setCsHubRecords(await api.getAllRecords());
-        } catch (err) {
-            setError(`Failed to load CS Hub data: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        setCsHubRecords(await api.getAllRecords());
     }, []);
 
     const fetchAccountsData = useCallback(async () => {
-        try {
-            setAccounts(await api.getAccounts());
-        } catch (err) {
-            setError(`Failed to load Accounts data: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        setAccounts(await api.getAccounts());
     }, []);
 
     const fetchTasksData = useCallback(async () => {
-        try {
-            setTasks(await api.getTasks());
-        } catch (err) {
-            setError(`Failed to load Tasks data: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        setTasks(await api.getTasks());
     }, []);
 
     const fetchDirectoryData = useCallback(async () => {
-        try {
-            setContacts(await api.getDirectory());
-        } catch (err) {
-            setError(`Failed to load Directory data: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        setContacts(await api.getDirectory());
     }, []);
     
     const fetchFinancingData = useCallback(async () => {
-        try {
-            setFinancingRecords(await api.getFinancingLedger());
-        } catch (err) {
-            setError(`Failed to load Financing data: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        setFinancingRecords(await api.getFinancingLedger());
     }, []);
 
-    const fetchAllData = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const promises = [];
-            if (availableViews.includes('csHub')) promises.push(fetchCSHubData());
-            if (availableViews.includes('accounts')) promises.push(fetchAccountsData());
-            if (availableViews.includes('tasks')) promises.push(fetchTasksData());
-            if (availableViews.includes('directory')) promises.push(fetchDirectoryData());
-            if (availableViews.includes('financing')) promises.push(fetchFinancingData());
-
-            await Promise.all(promises);
-
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "An unknown error occurred while fetching data.");
-        } finally {
-            setIsLoading(false);
-        }
-    }, [availableViews, fetchCSHubData, fetchAccountsData, fetchTasksData, fetchDirectoryData, fetchFinancingData]);
-
     useEffect(() => {
-        fetchAllData();
-    }, [fetchAllData]);
+        if (!activeView || fetchedViews.has(activeView) || isLoading[activeView]) {
+            return;
+        }
+
+        const fetchDataForView = async (view: View) => {
+            setIsLoading(prev => ({ ...prev, [view]: true }));
+            setError(prev => ({ ...prev, [view]: null }));
+
+            try {
+                switch (view) {
+                    case 'csHub':
+                        await fetchCSHubData();
+                        break;
+                    case 'accounts':
+                        await fetchAccountsData();
+                        break;
+                    case 'tasks':
+                        await fetchTasksData();
+                        break;
+                    case 'directory':
+                        await fetchDirectoryData();
+                        break;
+                    case 'financing':
+                        await fetchFinancingData();
+                        break;
+                }
+                setFetchedViews(prev => new Set(prev).add(view));
+            } catch (err) {
+                const message = err instanceof Error ? err.message : 'Unknown error';
+                setError(prev => ({ ...prev, [view]: `Failed to load data: ${message}` }));
+            } finally {
+                setIsLoading(prev => ({ ...prev, [view]: false }));
+            }
+        };
+
+        fetchDataForView(activeView);
+    }, [activeView, fetchedViews, isLoading, fetchCSHubData, fetchAccountsData, fetchTasksData, fetchDirectoryData, fetchFinancingData]);
+
 
     useEffect(() => {
         if (syncState.status === 'success' || syncState.status === 'error') {
@@ -182,20 +180,37 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     };
 
     const renderContent = () => {
-        if (isLoading) {
+        if (!activeView) {
             return (
                 <div className="flex flex-col justify-center items-center h-[60vh]">
                     <Spinner size="lg" />
-                    <p className="mt-4 text-on-surface-secondary text-lg">Loading Application Data...</p>
+                    <p className="mt-4 text-on-surface-secondary text-lg">Loading Application...</p>
                 </div>
             );
         }
-        if (error && !activeView) {
+
+        if (isLoading[activeView]) {
+            return (
+                <div className="flex flex-col justify-center items-center h-[60vh]">
+                    <Spinner size="lg" />
+                    <p className="mt-4 text-on-surface-secondary text-lg">Loading {activeView} Data...</p>
+                </div>
+            );
+        }
+        if (error[activeView]) {
+            const refetch = () => {
+                setFetchedViews(prev => {
+                    const newSet = new Set(prev);
+                    if(activeView) newSet.delete(activeView);
+                    return newSet;
+                });
+            };
+
             return (
                 <div className="text-center py-10 px-4 bg-red-50 text-red-700 rounded-lg">
-                    <h2 className="text-xl font-bold mb-2">Failed to Load Application</h2>
-                    <p>{error}</p>
-                    <button onClick={fetchAllData} className="mt-4 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover">
+                    <h2 className="text-xl font-bold mb-2">Failed to Load Data</h2>
+                    <p>{error[activeView]}</p>
+                    <button onClick={refetch} className="mt-4 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover">
                         Try Again
                     </button>
                 </div>
