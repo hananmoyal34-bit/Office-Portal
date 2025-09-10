@@ -1,0 +1,5 @@
+{
+  "name": "Customer Service Hub Manager",
+  "description": "A comprehensive CRUD interface to manage customer service records stored in a Google Sheet. Allows for creating, reading, updating, and deleting tickets, including file attachments.",
+  "requestFramePermissions": []
+}
